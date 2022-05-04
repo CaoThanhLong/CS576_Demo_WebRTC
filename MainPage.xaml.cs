@@ -28,6 +28,8 @@ namespace Demo_WebRTC
     /// </summary>
     public sealed partial class MainPage : Page
     {
+        private PeerConnection _peerConnection;
+
         public MainPage()
         {
             this.InitializeComponent();
@@ -54,11 +56,31 @@ namespace Demo_WebRTC
                 Debugger.Log(0, "", $"Webcam {device.name} (id : {device.id})\n");
             }   
 
+            // Configurate peer connection
+            _peerConnection = new PeerConnection();
+
+            var config = new PeerConnectionConfiguration
+            {
+                IceServers = new List<IceServer>
+                {
+                    new IceServer{ Urls = { "stun:stun.1.google.com:19302" } }
+                }
+            };
+
+            await _peerConnection.InitializeAsync(config);
+
+            Debugger.Log(0, "", "Peer connection initialized successfully!.\n");
+
         }
 
         private void Current_Suspending(object sender, SuspendingEventArgs e)
         {
-            
+            if (_peerConnection != null)
+            {
+                _peerConnection.Close();
+                _peerConnection.Dispose();
+                _peerConnection = null; 
+            }
         }
     }
 }
