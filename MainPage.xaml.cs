@@ -36,6 +36,8 @@ namespace Demo_WebRTC
         private PeerConnection _peerConnection;
         private MediaStreamSource _localVideoSource;
         private VideoBridge _localVideoBridge = new VideoBridge(3); // initialized with a queue capacity of 3 frames
+        private bool _localVideoPlaying = false;
+        private object _localVideoLock = new object();
 
         public MainPage()
         {
@@ -119,7 +121,46 @@ namespace Demo_WebRTC
 
         private void LocalI420AFrameReady(I420AVideoFrame frame)
         {
+            lock (_localVideoLock)
+            {
+                if (!_localVideoPlaying)
+                {
+                    _localVideoPlaying = true;
+
+                    // Capture the resolution into local variable useable from the lambda below
+                    uint width = frame.width;
+                    uint height = frame.height;
+
+                    // Defer UI-related work to the main UI thread
+                    RunOnMainThread(() =>
+                    {
+                        // Bridge the local video track with the local media player UI
+                        int framerate = 30; // // assumed, for lack of an actual value
+                        _localVideoSource = CreateI420VideoStreamSource(width, height, framerate);
+                        var localVideoPlayer = new MediaPlayer();
+                        localVideoPlayer.Source = MediaSource.CreateFromMediaStreamSource(_localVideoSource);
+                        localVideoPlayerElement.SetMediaPlayer(localVideoPlayer);
+                        localVideoPlayer.Play();
+                    });
+                }
+            }
+
+            // Enqueue the incoming frame into the video bridge; the media player will
+            // later dequeue it as soon as it's ready.
             _localVideoBridge.HandleIncomingVideoFrame(frame);
+        }
+
+        private void RunOnMainThread(Windows.UI.Core.DispatchedHandler handler)
+        {
+            if (Dispatcher.HasThreadAccess)
+            {
+                handler.Invoke();
+            }
+            else
+            {
+                // Note: use a discard "_" to silence CS4014 warning
+                _ = Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, handler);
+            }
         }
 
         private MediaStreamSource CreateI420VideoStreamSource(uint width, uint height, int framerate)
@@ -174,6 +215,9 @@ namespace Demo_WebRTC
                 _peerConnection.Dispose();
                 _peerConnection = null; 
             }
+
+            // avoids keeping the last video frame when the video is turned off
+            localVideoPlayerElement.SetMediaPlayer(null);
         }
     }
 }
