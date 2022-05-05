@@ -9,6 +9,6 @@
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-
+        <MediaPlayerElement x:Name="localVideoPlayerElement"/>
     </Grid>
 </Page>

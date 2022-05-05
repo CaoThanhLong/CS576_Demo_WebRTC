@@ -19,6 +19,11 @@ using System.Diagnostics;
 using Windows.Media.Capture;
 using Windows.ApplicationModel;
 
+using TestAppUwp.Video;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Media.MediaProperties;
+
 // The Blank Page item template is documented at https://go.microsoft.com/fwlink/?LinkId=402352&clcid=0x409
 
 namespace Demo_WebRTC
@@ -29,6 +34,8 @@ namespace Demo_WebRTC
     public sealed partial class MainPage : Page
     {
         private PeerConnection _peerConnection;
+        private MediaStreamSource _localVideoSource;
+        private VideoBridge _localVideoBridge = new VideoBridge(3); // initialized with a queue capacity of 3 frames
 
         public MainPage()
         {
@@ -71,6 +78,92 @@ namespace Demo_WebRTC
 
             Debugger.Log(0, "", "Peer connection initialized successfully!.\n");
 
+            // Add local media tracks
+            DeviceAudioTrackSource _microphoneSource;
+            DeviceVideoTrackSource _webcamSource;
+            LocalAudioTrack _localAudioTrack;
+            LocalVideoTrack _localVideoTrack;
+
+            // Video track
+            _webcamSource = await DeviceVideoTrackSource.CreateAsync();
+            _webcamSource.I420AVideoFrameReady += LocalI420AFrameReady;
+
+            var videoTrackConfig = new LocalVideoTrackInitConfig
+            {
+                trackName = "webcam_track"
+            };
+
+            _localVideoTrack = LocalVideoTrack.CreateFromSource(_webcamSource, videoTrackConfig);
+
+            // Audio track
+            _microphoneSource = await DeviceAudioTrackSource.CreateAsync();
+
+            var audioTrackConfig = new LocalAudioTrackInitConfig
+            {
+                trackName = "microphone_track"
+            };
+
+            _localAudioTrack = LocalAudioTrack.CreateFromSource(_microphoneSource, audioTrackConfig);
+
+
+            // Add tranceivers
+            Transceiver _audioTranceiver;
+            Transceiver _videoTransceiver;
+
+            _audioTranceiver = _peerConnection.AddTransceiver(MediaKind.Audio);
+            _videoTransceiver = _peerConnection.AddTransceiver(MediaKind.Video);
+
+            _audioTranceiver.LocalAudioTrack = _localAudioTrack;
+            _videoTransceiver.LocalVideoTrack = _localVideoTrack;
+        }
+
+        private void LocalI420AFrameReady(I420AVideoFrame frame)
+        {
+            _localVideoBridge.HandleIncomingVideoFrame(frame);
+        }
+
+        private MediaStreamSource CreateI420VideoStreamSource(uint width, uint height, int framerate)
+        {
+            if (width == 0)
+            {
+                throw new ArgumentException("Invalid zero width for video.", "width");
+            }
+
+            if (height == 0)
+            {
+                throw new ArgumentException("Invalid zero height for video.", "width");
+            }
+
+            var videoProperties = VideoEncodingProperties.CreateUncompressed(MediaEncodingSubtypes.Iyuv, width, height);
+            var videoStreamDesc = new VideoStreamDescriptor(videoProperties);
+            videoStreamDesc.EncodingProperties.FrameRate.Numerator = (uint)framerate;
+            videoStreamDesc.EncodingProperties.FrameRate.Denominator = 1;
+
+            // Bitrate in bits per second : framerate * frame pixel size * I420=12bpp
+            videoStreamDesc.EncodingProperties.Bitrate = ((uint)framerate * width * height * 12);
+            var videoStreamSource = new MediaStreamSource(videoStreamDesc);
+            videoStreamSource.BufferTime = TimeSpan.Zero;
+            videoStreamSource.SampleRequested += OnMediaStreamSourceRequested;
+            videoStreamSource.IsLive = true; // Enables optimizations for live sources
+            videoStreamSource.CanSeek = false; // Cannot seek live WebRTC video stream
+
+            return videoStreamSource;
+        }
+
+        private void OnMediaStreamSourceRequested(MediaStreamSource sender, MediaStreamSourceSampleRequestedEventArgs args)
+        {
+            VideoBridge videoBridge;
+
+            if (sender == _localVideoSource)
+            {
+                videoBridge = _localVideoBridge;
+            }
+            else
+            {
+                return;
+            }
+
+            videoBridge.TryServeVideoFrame(args);
         }
 
         private void Current_Suspending(object sender, SuspendingEventArgs e)
